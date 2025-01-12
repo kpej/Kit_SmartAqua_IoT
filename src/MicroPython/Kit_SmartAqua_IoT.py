@@ -3,9 +3,9 @@
 # Description  : 이티보드 스마트 어항 코딩 키트(IoT)
 # Author       : 손철수
 # Created Date : 2024.09.19 : PEJ 
-# Reference    :
+# Reference    : 2025.01.12 : 손철수 : TDS 로직 변경
 # ******************************************************************************************
-board_firmware_verion = 'smartAqu_0.91';
+board_firmware_verion = 'smartAqu_0.92';
 
 
 #===========================================================================================
@@ -77,7 +77,7 @@ def et_setup():                                          #  사용자 맞춤형 
     roms = ds_sensor.scan()                              # 수온 센서 스캔
     print('Found DS devices: ', roms)                    # 수온 센서 출력
 
-    tds_pin.atten(ADC.ATTN_11DB)                         # 수질 센서 : 입력 모드
+    tds_pin.atten(ADC.ATTN_6DB)                          # 수질 센서 : 입력 모드
 
     level_pin.init(Pin.IN, Pin.PULL_UP)                  # 수위 센서 : 입력 모드
 
@@ -156,19 +156,25 @@ def tds_get():                                           # 수질 측정
 
     step = 'step 3'
     display_information()
+    
+    samples=100
+    delay=1
+    total_adc = 0
+    for _ in range(samples):
+        total_adc += tds_pin.read()
+        time.sleep_ms(delay)
+    tds_value = total_adc / samples
 
-    tds_value = tds_pin.read()                           # 수질 측정
     if tds_value <= 0:                                   # 수질 센서 예외 처리
         tds = -1
         print('수질 감지 센서 오류')
-        return
+        return    
+    
+    voltage = (3.3 / 4095) * tds_value
 
-    voltage = tds_value * 5 / 4096.0
-    compensationVolatge = voltage * (1.0 + 0.02 * (temp - 25.0))
-    tds = (133.42/compensationVolatge * compensationVolatge * compensationVolatge - 255.86 \
-           * compensationVolatge * compensationVolatge + 857.39 * compensationVolatge) * 0.5
-
-
+    ec = 133.42 * (voltage ** 3) - 255.86 * (voltage ** 2) + 857.39 * voltage
+    tds = ec * 0.5
+    
 #===========================================================================================
 def level_get():                                         # 수위 측정
 #===========================================================================================
