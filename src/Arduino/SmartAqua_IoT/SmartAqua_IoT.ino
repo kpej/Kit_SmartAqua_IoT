@@ -4,8 +4,10 @@
  * Author       : PEJ
  * Created Date : 2022.09.30
  * Reference    : 
+ * Modified     : 2025.07.02 : 박은정 : TDS 로직 변경(Python 코드 반영)
+ * Modified     : 2025.07.02 : 박은정 : 타이머 계산 방법 수정
 ******************************************************************************************/
-const char* board_firmware_verion = "smartAqu_0.91";
+const char* board_firmware_verion = "smartAqu_0.93";
 
 
 //==========================================================================================
@@ -52,7 +54,12 @@ float tds = 0;                                           // 수질
 String level = "shortage";                               // 수위
 String motor_state = "off";                              // 모터 상태
 
-unsigned long timer = 1 * 60  * 120  * 1000UL;           // 먹이 공급 타이머의 시간
+unsigned int hours = 2;                                  // 타이머의 시간 (2시간)
+unsigned int minutes = 30;                               // 타이머의 분 (30분)
+unsigned int seconds = 10;                               // 타이머의 초 (10초)
+// 타이머 시간 계산(현재 2시간 30분 10초로 설정되어 있음)
+unsigned long timer = (hours * 3600UL + minutes * 60UL + seconds) * 1000UL;
+
 unsigned long now = 0;                                   // 현재 시간
 unsigned long last_feeding = 0;                          // 마지막 먹이 공급 시간
 String time_remaining = "00:00:00";                      // 남은 타이머 시간
@@ -148,24 +155,38 @@ void temp_get()                                          // 수온 측정
 }
 
 
-//==========================================================================================
-void tds_get()                                           // 수온 측정
-//==========================================================================================
+void tds_get()                                           // 수질 측정
 {
   step = "step 3";
   display_information();
 
-  int tds_value = analogRead(tds_pin);                   // 수질 측정
-  if (tds_value < 0) {                                   // 수질 센서 예외 처리
-    tds = -1;
+  const int samples = 100;                               // 샘플 수
+  const int delay_time = 1;                              // 샘플링 간 간격 (ms)
+  long total_adc = 0;                                    // ADC 합계
+
+  for (int i = 0; i < samples; i++) {
+    total_adc += analogRead(tds_pin);                    // ADC 읽기
+    delay(delay_time);                                   // 잠시 대기
+  }
+
+  float tds_value = total_adc / samples;                 // 평균값 계산
+
+  if (tds_value < 0) {                                   // tds 값이 0 미만일 경우
+    tds = -1;                                            // 예외 처리
     Serial.println("수질 감지 센서 오류");
     return;
   }
 
-  float voltage = tds_value * 5.0 / 1023.0;
-  float compensationVoltage = voltage * (1.0 + 0.02 * (temp - 25.0));
-  tds = (133.42 / compensationVoltage * compensationVoltage * compensationVoltage - 255.86
-        * compensationVoltage * compensationVoltage + 857.39 * compensationVoltage) * 0.5;
+  // 전압 변환 (3.3V 기준, 10bit ADC: 0~1023)
+  float voltage = (3.3 / 1023.0) * tds_value;
+
+  // EC 계산
+  float ec = 133.42 * pow(voltage, 3)
+           - 255.86 * pow(voltage, 2)
+           + 857.39 * voltage;
+
+  // TDS 값은 EC의 절반
+  tds = ec * 0.5;
 }
 
 
@@ -263,18 +284,19 @@ void et_short_periodic_process()                         // 사용자 주기적 
 void time_remaining_calculate()                          // 남은 시간 계산
 //==========================================================================================
 {
-  unsigned long time_cal = now - last_feeding;
-  unsigned long timer_cal = timer - time_cal;
+  // 남은 시간 계산 (음수 방지)
+  unsigned long elapsed = now - last_feeding;
+  unsigned long remaining = (elapsed < timer) ? timer - elapsed : 0;
 
-  int hour = timer_cal / (60 * 60 * 1000);
-  timer_cal = timer_cal % (60 * 60 * 1000);
+  // 시:분:초로 분해
+  int h = remaining / 3600000UL;
+  int m = (remaining / 60000UL) % 60;
+  int s = (remaining / 1000UL) % 60;
 
-  int minute = timer_cal / (60 * 1000);
-  timer_cal = timer_cal % (60 * 1000);
+  char buffer[9];
+  sprintf(buffer, "%02d:%02d:%02d", h, m, s);            // 시간 문자열 포맷 (00:00:00 형태)
 
-  int second = timer_cal / 1000;
-
-  time_remaining = String(hour) + ":" + String(minute) + ":" + String(second);
+  time_remaining = String(buffer);
 }
 
 
